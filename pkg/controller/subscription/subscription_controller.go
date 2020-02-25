@@ -2,28 +2,34 @@ package subscription
 
 import (
 	"context"
+
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1alpha1"
+	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	logf "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-var log = logf.Log.WithName("controller_subscription")
+const (
+	// IntegreatlyPackage - package name is used for Subsription name
+	IntegreatlyPackage = "integreatly"
+)
 
 // Add creates a new Subscription Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
-func Add(mgr manager.Manager, products []string) error {
+func Add(mgr manager.Manager, _ []string) error {
 	return add(mgr, newReconciler(mgr))
 }
 
 func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileSubscription{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+	operatorNs, _ := k8sutil.GetOperatorNamespace()
+	return &ReconcileSubscription{client: mgr.GetClient(), scheme: mgr.GetScheme(), operatorNamespace: operatorNs}
 }
 
 func add(mgr manager.Manager, r reconcile.Reconciler) error {
@@ -43,15 +49,18 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 var _ reconcile.Reconciler = &ReconcileSubscription{}
 
 type ReconcileSubscription struct {
-	client client.Client
-	scheme *runtime.Scheme
+	client            k8sclient.Client
+	scheme            *runtime.Scheme
+	operatorNamespace string
 }
 
 // Reconcile will ensure that that Subscription object(s) have Manual approval for the upgrades
 // In a namespaced installation of integreatly operator it will only reconcile Subscription of the integreatly operator itself
 func (r *ReconcileSubscription) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	reqLogger.Info("Reconciling Subscription")
+	// skip any Subscriptions that are not integreatly operator
+	if request.Namespace != r.operatorNamespace || request.Name != IntegreatlyPackage {
+		return reconcile.Result{}, nil
+	}
 
 	instance := &v1alpha1.Subscription{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)

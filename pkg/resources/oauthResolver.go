@@ -5,11 +5,13 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"net/http"
 	"os"
+
+	"github.com/sirupsen/logrus"
+
+	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 )
 
 const oauthServerDetails = "%s/.well-known/oauth-authorization-server"
@@ -33,7 +35,7 @@ func (or *OauthResolver) GetOauthEndPoint() (*OauthServerConfig, error) {
 
 	caCert, err := ioutil.ReadFile(rootCAFile)
 	// if running locally, CA certificate isn't available in expected path
-	if os.IsNotExist(err) || os.Getenv("INTEGREATLY_OPERATOR_DISABLE_ELECTION") != "" {
+	if os.IsNotExist(err) && os.Getenv(k8sutil.ForceRunModeEnv) == string(k8sutil.LocalRunMode) {
 		logrus.Warn("GetOauthEndPoint() will skip certificate verification - this is acceptable only if operator is running locally")
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -41,7 +43,7 @@ func (or *OauthResolver) GetOauthEndPoint() (*OauthServerConfig, error) {
 		or.client.Transport = tr
 	} else {
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to read k8s root CA file")
+			return nil, fmt.Errorf("failed to read k8s root CA file: %w", err)
 		}
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(caCert)
@@ -56,13 +58,13 @@ func (or *OauthResolver) GetOauthEndPoint() (*OauthServerConfig, error) {
 
 	resp, err := or.client.Get(url)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get oauth server config from well known endpoint "+url)
+		return nil, fmt.Errorf("failed to get oauth server config from well known endpoint %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	dec := json.NewDecoder(resp.Body)
 	ret := &OauthServerConfig{}
 	if err := dec.Decode(ret); err != nil {
-		return nil, errors.Wrap(err, "failed to decode response from well known end point "+url)
+		return nil, fmt.Errorf("failed to decode response from well known endpoint %s: %w", url, err)
 	}
 
 	return ret, nil

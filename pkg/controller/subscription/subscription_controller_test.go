@@ -2,14 +2,20 @@ package subscription
 
 import (
 	"context"
+	"testing"
+
 	"github.com/operator-framework/operator-lifecycle-manager/pkg/api/apis/operators/v1alpha1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"testing"
+)
+
+const (
+	operatorNamespace = "openshift-operators"
 )
 
 func getBuildScheme() (*runtime.Scheme, error) {
@@ -23,33 +29,89 @@ func TestSubscriptionReconciler(t *testing.T) {
 		Name            string
 		Request         reconcile.Request
 		APISubscription *v1alpha1.Subscription
-		Verify          func(client client.Client, res reconcile.Result, err error, t *testing.T)
+		Verify          func(client k8sclient.Client, res reconcile.Result, err error, t *testing.T)
 	}{
 		{
-			Name: "subscription controller changes automatic to manual",
+			Name: "subscription controller changes integreatly Subscription from automatic to manual",
 			Request: reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Namespace: "test-namespace",
-					Name:      "test-subscription",
+					Namespace: operatorNamespace,
+					Name:      IntegreatlyPackage,
 				},
 			},
 			APISubscription: &v1alpha1.Subscription{
-				ObjectMeta: v1.ObjectMeta{
-					Namespace: "test-namespace",
-					Name:      "test-subscription",
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: operatorNamespace,
+					Name:      IntegreatlyPackage,
 				},
 				Spec: &v1alpha1.SubscriptionSpec{
 					InstallPlanApproval: v1alpha1.ApprovalAutomatic,
 				},
 			},
-			Verify: func(c client.Client, res reconcile.Result, err error, t *testing.T) {
+			Verify: func(c k8sclient.Client, res reconcile.Result, err error, t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %s", err.Error())
 				}
 				sub := &v1alpha1.Subscription{}
-				c.Get(context.TODO(), client.ObjectKey{Name: "test-subscription", Namespace: "test-namespace"}, sub)
+				c.Get(context.TODO(), k8sclient.ObjectKey{Name: IntegreatlyPackage, Namespace: operatorNamespace}, sub)
 				if sub.Spec.InstallPlanApproval != v1alpha1.ApprovalManual {
 					t.Fatalf("expected Manual but got %s", sub.Spec.InstallPlanApproval)
+				}
+			},
+		},
+		{
+			Name: "subscription controller doesn't change subscription in different namespace",
+			Request: reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: "other-ns",
+					Name:      IntegreatlyPackage,
+				},
+			},
+			APISubscription: &v1alpha1.Subscription{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "other-ns",
+					Name:      IntegreatlyPackage,
+				},
+				Spec: &v1alpha1.SubscriptionSpec{
+					InstallPlanApproval: v1alpha1.ApprovalAutomatic,
+				},
+			},
+			Verify: func(c k8sclient.Client, res reconcile.Result, err error, t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected error: %s", err.Error())
+				}
+				sub := &v1alpha1.Subscription{}
+				c.Get(context.TODO(), k8sclient.ObjectKey{Name: IntegreatlyPackage, Namespace: "other-ns"}, sub)
+				if sub.Spec.InstallPlanApproval != v1alpha1.ApprovalAutomatic {
+					t.Fatalf("expected Automatic but got %s", sub.Spec.InstallPlanApproval)
+				}
+			},
+		},
+		{
+			Name: "subscription controller doesn't change other subscription in the same namespace",
+			Request: reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: operatorNamespace,
+					Name:      "other-package",
+				},
+			},
+			APISubscription: &v1alpha1.Subscription{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: operatorNamespace,
+					Name:      "other-package",
+				},
+				Spec: &v1alpha1.SubscriptionSpec{
+					InstallPlanApproval: v1alpha1.ApprovalAutomatic,
+				},
+			},
+			Verify: func(c k8sclient.Client, res reconcile.Result, err error, t *testing.T) {
+				if err != nil {
+					t.Fatalf("unexpected error: %s", err.Error())
+				}
+				sub := &v1alpha1.Subscription{}
+				c.Get(context.TODO(), k8sclient.ObjectKey{Name: "other-package", Namespace: operatorNamespace}, sub)
+				if sub.Spec.InstallPlanApproval != v1alpha1.ApprovalAutomatic {
+					t.Fatalf("expected Automatic but got %s", sub.Spec.InstallPlanApproval)
 				}
 			},
 		},
@@ -57,12 +119,12 @@ func TestSubscriptionReconciler(t *testing.T) {
 			Name: "subscription controller handles when subscription is missing",
 			Request: reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Namespace: "test-namespace",
-					Name:      "test-subscription",
+					Namespace: operatorNamespace,
+					Name:      IntegreatlyPackage,
 				},
 			},
 			APISubscription: &v1alpha1.Subscription{},
-			Verify: func(c client.Client, res reconcile.Result, err error, t *testing.T) {
+			Verify: func(c k8sclient.Client, res reconcile.Result, err error, t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %s", err.Error())
 				}
@@ -79,8 +141,9 @@ func TestSubscriptionReconciler(t *testing.T) {
 			APIObject := scenario.APISubscription
 			client := fakeclient.NewFakeClientWithScheme(scheme, APIObject)
 			reconciler := ReconcileSubscription{
-				client: client,
-				scheme: scheme,
+				client:            client,
+				scheme:            scheme,
+				operatorNamespace: operatorNamespace,
 			}
 			res, err := reconciler.Reconcile(scenario.Request)
 			scenario.Verify(client, res, err, t)

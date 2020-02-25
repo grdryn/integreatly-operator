@@ -1,10 +1,12 @@
 package resources
 
 import (
+	"errors"
 	"fmt"
-	"github.com/pkg/errors"
 	"regexp"
 	"strconv"
+
+	integreatlyv1alpha1 "github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1"
 )
 
 type Version struct {
@@ -13,9 +15,9 @@ type Version struct {
 	Patch int
 }
 
-func NewVersion(version string) (*Version, error) {
+func NewVersion(version integreatlyv1alpha1.OperatorVersion) (*Version, error) {
 	r, _ := regexp.Compile(`^[Vv]?([0-9]+)\.([0-9]+)(\.|\-)([0-9]+)$`)
-	matches := r.FindStringSubmatch(version)
+	matches := r.FindStringSubmatch(string(version))
 	if len(matches) < 5 {
 		return nil, errors.New("invalid version")
 	}

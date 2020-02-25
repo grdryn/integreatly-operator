@@ -1,0 +1,4 @@
+packageName: rhmi-codeready-workspaces
+channels:
+- name: rhmi
+  currentCSV: crwoperator.v2.0.0

@@ -1,0 +1,4 @@
+packageName: rhmi-apicurito
+channels:
+  - name: rhmi
+    currentCSV: apicuritooperator.v7.5.0

@@ -2,16 +2,21 @@ package resources
 
 import (
 	"context"
-	"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1"
-	"github.com/operator-framework/operator-lifecycle-manager/pkg/lib/ownerutil"
-	pkgerr "github.com/pkg/errors"
+	"fmt"
+
 	"github.com/sirupsen/logrus"
-	v1 "k8s.io/api/batch/v1"
-	"k8s.io/api/batch/v1beta1"
+
+	monitoringv1 "github.com/coreos/prometheus-operator/pkg/apis/monitoring/v1"
+	productsConfig "github.com/integr8ly/integreatly-operator/pkg/config"
+
+	batchv1 "k8s.io/api/batch/v1"
+	batchv1beta1 "k8s.io/api/batch/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	pkgclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 type BackupConfig struct {
@@ -34,39 +39,95 @@ type BackupSecretLocation struct {
 	Namespace string
 }
 
-func ReconcileBackup(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation, config BackupConfig) error {
+var (
+	BackupServiceAccountName = "rhmi-backupjob"
+	BackupRoleName           = "rhmi-backupjob"
+	BackupRoleBindingName    = "rhmi-backupjob"
+)
+
+func ReconcileBackup(ctx context.Context, serverClient k8sclient.Client, config BackupConfig, configManager productsConfig.ConfigReadWriter) error {
 	logrus.Infof("reconciling backups: %s", config.Name)
-	err := reconcileClusterRole(ctx, serverClient, inst)
+
+	err := reconcileBackendSecret(ctx, serverClient, config, configManager.GetBackupsSecretName(), configManager.GetOperatorNamespace())
 	if err != nil {
 		return err
 	}
 
-	err = reconcileServiceAccount(ctx, serverClient, inst, config)
+	err = reconcileRole(ctx, serverClient, config)
 	if err != nil {
 		return err
 	}
 
-	err = reconcileClusterRoleBinding(ctx, serverClient, inst, config)
+	err = reconcileServiceAccount(ctx, serverClient, config)
 	if err != nil {
 		return err
 	}
 
-	err = reconcileCronjobs(ctx, serverClient, inst, config)
+	err = reconcileRoleBinding(ctx, serverClient, config)
+	if err != nil {
+		return err
+	}
+
+	err = reconcileCronjobs(ctx, serverClient, config)
+	if err != nil {
+		return err
+	}
+
+	err = reconcileCronjobAlerts(ctx, serverClient, config)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func reconcileClusterRole(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation) error {
-	backupJobsClusterRole := &rbacv1.ClusterRole{
+func reconcileBackendSecret(ctx context.Context, serverClient k8sclient.Client, config BackupConfig, secretName string, secretNamespace string) error {
+	sourceSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "backupjob",
+			Name:      secretName,
+			Namespace: secretNamespace,
 		},
-		Rules: []rbacv1.PolicyRule{
+	}
+	err := serverClient.Get(ctx, k8sclient.ObjectKey{Namespace: sourceSecret.Namespace, Name: sourceSecret.Name}, sourceSecret)
+	if err != nil {
+		return fmt.Errorf("Could not get secret that contains S3 credentials for backup CronJobs - %s Secret from %s namespace: %w", sourceSecret.Name, sourceSecret.Namespace, err)
+	}
+
+	destinationSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      config.BackendSecret.Name,
+			Namespace: config.BackendSecret.Namespace,
+		},
+	}
+	or, err := controllerutil.CreateOrUpdate(ctx, serverClient, destinationSecret, func() error {
+		// Transforming from Secret field names of CRO to the names consumed by our scripts:
+		// https://github.com/integr8ly/backup-container-image/blob/master/image/tools/lib/backend/s3.sh#L10-L20
+		destinationSecret.Data = map[string][]byte{
+			"AWS_ACCESS_KEY_ID":     sourceSecret.Data["credentialKeyID"],
+			"AWS_SECRET_ACCESS_KEY": sourceSecret.Data["credentialSecretKey"],
+			"AWS_S3_BUCKET_NAME":    sourceSecret.Data["bucketName"],
+			"AWS_S3_REGION":         sourceSecret.Data["bucketRegion"],
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("Could not %s backup Secret %s in %s namespace: %w", or, destinationSecret.Name, destinationSecret.Namespace, err)
+	}
+
+	return nil
+}
+
+func reconcileRole(ctx context.Context, serverClient k8sclient.Client, config BackupConfig) error {
+	backupJobsRole := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      BackupRoleName,
+			Namespace: config.Namespace,
+		},
+	}
+	_, err := controllerutil.CreateOrUpdate(ctx, serverClient, backupJobsRole, func() error {
+		backupJobsRole.Rules = []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{"*"},
-				Resources: []string{"*"},
+				APIGroups: []string{""},
+				Resources: []string{"pods", "secrets"},
 				Verbs:     []string{"get", "list"},
 			},
 			{
@@ -74,83 +135,90 @@ func reconcileClusterRole(ctx context.Context, serverClient pkgclient.Client, in
 				Resources: []string{"pods/exec"},
 				Verbs:     []string{"create"},
 			},
-		},
-	}
-	ref := metav1.NewControllerRef(inst, v1alpha1.SchemaGroupVersionKind)
-	backupJobsClusterRole.OwnerReferences = append(backupJobsClusterRole.OwnerReferences, *ref)
-	return CreateOrUpdate(ctx, serverClient, backupJobsClusterRole)
+		}
+		return nil
+	})
+	return err
 }
 
-func reconcileServiceAccount(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation, config BackupConfig) error {
+func reconcileServiceAccount(ctx context.Context, serverClient k8sclient.Client, config BackupConfig) error {
 	serviceAccount := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: config.Namespace,
-			Name:      "backupjob",
+			Name:      BackupServiceAccountName,
 		},
 	}
 
-	ref := metav1.NewControllerRef(inst, v1alpha1.SchemaGroupVersionKind)
-	serviceAccount.OwnerReferences = append(serviceAccount.OwnerReferences, *ref)
-	return CreateOrUpdate(ctx, serverClient, serviceAccount)
+	_, err := controllerutil.CreateOrUpdate(ctx, serverClient, serviceAccount, func() error {
+		return nil
+	})
+	return err
 }
 
-func reconcileClusterRoleBinding(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation, config BackupConfig) error {
-	backupJobsRoleBinding := &rbacv1.ClusterRoleBinding{
+func reconcileRoleBinding(ctx context.Context, serverClient k8sclient.Client, config BackupConfig) error {
+	backupJobsRoleBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      config.Name,
+			Name:      BackupRoleBindingName,
 			Namespace: config.Namespace,
 		},
-		RoleRef: rbacv1.RoleRef{
-			Name: "backupjob",
-			Kind: "ClusterRole",
-		},
-		Subjects: []rbacv1.Subject{
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, serverClient, backupJobsRoleBinding, func() error {
+		backupJobsRoleBinding.RoleRef = rbacv1.RoleRef{
+			Name: BackupRoleName,
+			Kind: "Role",
+		}
+		backupJobsRoleBinding.Subjects = []rbacv1.Subject{
 			{
-				Name:      "backupjob",
+				Name:      BackupServiceAccountName,
 				Kind:      "ServiceAccount",
 				Namespace: config.Namespace,
 			},
-		},
-	}
-
-	ref := metav1.NewControllerRef(inst, v1alpha1.SchemaGroupVersionKind)
-	backupJobsRoleBinding.OwnerReferences = append(backupJobsRoleBinding.OwnerReferences, *ref)
-	return CreateOrUpdate(ctx, serverClient, backupJobsRoleBinding)
+		}
+		return nil
+	})
+	return err
 }
 
-func reconcileCronjobs(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation, config BackupConfig) error {
+func reconcileCronjobs(ctx context.Context, serverClient k8sclient.Client, config BackupConfig) error {
 	for _, component := range config.Components {
-		err := reconcileCronjob(ctx, serverClient, inst, config, component)
+		err := reconcileCronjob(ctx, serverClient, config, component)
 		if err != nil {
-			return pkgerr.Wrapf(err, "error reconciling backup job %s, for component %s", config.Name, component)
+			return fmt.Errorf("error reconciling backup job %s, for component %s: %w", config.Name, component, err)
 		}
 	}
 	return nil
 }
-func reconcileCronjob(ctx context.Context, serverClient pkgclient.Client, inst *v1alpha1.Installation, config BackupConfig, component BackupComponent) error {
-	cronjob := &v1beta1.CronJob{
+
+func reconcileCronjob(ctx context.Context, serverClient k8sclient.Client, config BackupConfig, component BackupComponent) error {
+	monitoringConfig := productsConfig.NewMonitoring(productsConfig.ProductConfig{})
+
+	cronjob := &batchv1beta1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      component.Name,
 			Namespace: config.Namespace,
-			Labels:    map[string]string{"integreatly": "yes"},
 		},
-		Spec: v1beta1.CronJobSpec{
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, serverClient, cronjob, func() error {
+		cronjob.Labels = map[string]string{"integreatly": "yes", monitoringConfig.GetLabelSelectorKey(): monitoringConfig.GetLabelSelector()}
+		cronjob.Spec = batchv1beta1.CronJobSpec{
 			Schedule:          component.Schedule,
 			ConcurrencyPolicy: "Forbid",
-			JobTemplate: v1beta1.JobTemplateSpec{
-				Spec: v1.JobSpec{
+			JobTemplate: batchv1beta1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:   config.Name,
 							Labels: map[string]string{"integreatly": "yes", "cronjob-name": component.Name},
 						},
 						Spec: corev1.PodSpec{
-							ServiceAccountName: "backupjob",
+							ServiceAccountName: BackupServiceAccountName,
 							RestartPolicy:      corev1.RestartPolicyOnFailure,
 							Containers: []corev1.Container{
 								{
 									Name:            "backup-cronjob",
-									Image:           "quay.io/integreatly/backup-container:master",
+									Image:           "quay.io/omatskiv/backup-container:latest", //FIXME - workaround until we merge https://github.com/integr8ly/backup-container-image/pull/53
 									ImagePullPolicy: "Always",
 									Command: []string{
 										"/opt/intly/tools/entrypoint.sh",
@@ -193,7 +261,7 @@ func reconcileCronjob(ctx context.Context, serverClient pkgclient.Client, inst *
 											Value: config.Name,
 										},
 										{
-											Name:  "PRODUCT_NAMESPACE_PREFIX",
+											Name:  "PRODUCT_NAMESPACE",
 											Value: config.Namespace,
 										},
 									},
@@ -203,9 +271,47 @@ func reconcileCronjob(ctx context.Context, serverClient pkgclient.Client, inst *
 					},
 				},
 			},
+		}
+		return nil
+	})
+	return err
+}
+
+func reconcileCronjobAlerts(ctx context.Context, serverClient k8sclient.Client, config BackupConfig) error {
+	monitoringConfig := productsConfig.NewMonitoring(productsConfig.ProductConfig{})
+
+	rules := []monitoringv1.Rule{}
+	for _, component := range config.Components {
+		rules = append(rules, monitoringv1.Rule{
+			Alert: "CronJobExists_" + config.Namespace + "_" + component.Name,
+			Annotations: map[string]string{
+				"sop_url": "https://github.com/RHCloudServices/integreatly-help/blob/master/sops/alerts_and_troubleshooting.md",
+				"message": "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} does not exist",
+			},
+			Expr:   intstr.FromString("absent(kube_cronjob_info{cronjob=\"" + component.Name + "\", namespace=\"" + config.Namespace + "\"})"),
+			For:    "60s",
+			Labels: map[string]string{"severity": "critical"},
+		})
+	}
+
+	rule := &monitoringv1.PrometheusRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "backupjobs-exist-alerts",
+			Namespace: config.Namespace,
 		},
 	}
 
-	ownerutil.EnsureOwner(cronjob, inst)
-	return CreateOrUpdate(ctx, serverClient, cronjob)
+	_, err := controllerutil.CreateOrUpdate(ctx, serverClient, rule, func() error {
+		rule.ObjectMeta.Labels = map[string]string{"integreatly": "yes", monitoringConfig.GetLabelSelectorKey(): monitoringConfig.GetLabelSelector()}
+		rule.Spec = monitoringv1.PrometheusRuleSpec{
+			Groups: []monitoringv1.RuleGroup{
+				monitoringv1.RuleGroup{
+					Name:  "general.rules",
+					Rules: rules,
+				},
+			},
+		}
+		return nil
+	})
+	return err
 }

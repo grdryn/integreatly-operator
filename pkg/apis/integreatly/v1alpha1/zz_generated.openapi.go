@@ -11,29 +11,29 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
-		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.Installation":       schema_pkg_apis_integreatly_v1alpha1_Installation(ref),
-		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationSpec":   schema_pkg_apis_integreatly_v1alpha1_InstallationSpec(ref),
-		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationStatus": schema_pkg_apis_integreatly_v1alpha1_InstallationStatus(ref),
+		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMI":       schema_pkg_apis_integreatly_v1alpha1_RHMI(ref),
+		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMISpec":   schema_pkg_apis_integreatly_v1alpha1_RHMISpec(ref),
+		"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMIStatus": schema_pkg_apis_integreatly_v1alpha1_RHMIStatus(ref),
 	}
 }
 
-func schema_pkg_apis_integreatly_v1alpha1_Installation(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_pkg_apis_integreatly_v1alpha1_RHMI(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "Installation is the Schema for the installations API",
+				Description: "RHMI is the Schema for the RHMI API",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#types-kinds",
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"apiVersion": {
 						SchemaProps: spec.SchemaProps{
-							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#resources",
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -45,27 +45,27 @@ func schema_pkg_apis_integreatly_v1alpha1_Installation(ref common.ReferenceCallb
 					},
 					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationSpec"),
+							Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMISpec"),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationStatus"),
+							Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMIStatus"),
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationSpec", "github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
+			"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMISpec", "github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMIStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
 	}
 }
 
-func schema_pkg_apis_integreatly_v1alpha1_InstallationSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_pkg_apis_integreatly_v1alpha1_RHMISpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstallationSpec defines the desired state of Installation",
+				Description: "RHMISpec defines the desired state of Installation",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"type": {
@@ -81,7 +81,7 @@ func schema_pkg_apis_integreatly_v1alpha1_InstallationSpec(ref common.ReferenceC
 							Format: "",
 						},
 					},
-					"masterUrl": {
+					"masterURL": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
@@ -104,8 +104,28 @@ func schema_pkg_apis_integreatly_v1alpha1_InstallationSpec(ref common.ReferenceC
 							Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.PullSecretSpec"),
 						},
 					},
+					"useClusterStorage": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
+					"operatorsInProductNamespace": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OperatorsInProductNamespace is a flag that decides if the product operators should be installed in the product namespace (when set to true) or in standalone namespace (when set to false, default). Standalone namespace will be used only for those operators that support it.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"smtpSecret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SMTPSecret is the name of a secret in the installation namespace containing SMTP connection details. The secret must contain the following fields:\n\nhost port tls username password",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"type", "routingSubdomain", "masterUrl", "namespacePrefix", "selfSignedCerts", "pullSecret"},
+				Required: []string{"type", "namespacePrefix"},
 			},
 		},
 		Dependencies: []string{
@@ -113,44 +133,62 @@ func schema_pkg_apis_integreatly_v1alpha1_InstallationSpec(ref common.ReferenceC
 	}
 }
 
-func schema_pkg_apis_integreatly_v1alpha1_InstallationStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_pkg_apis_integreatly_v1alpha1_RHMIStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstallationStatus defines the observed state of Installation",
+				Description: "RHMIStatus defines the observed state of Installation",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"stages": {
 						SchemaProps: spec.SchemaProps{
-							Description: "INSERT ADDITIONAL STATUS FIELD - define observed state of cluster Important: Run \"operator-sdk generate k8s\" to regenerate code after modifying this file Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html",
+							Description: "INSERT ADDITIONAL STATUS FIELDS - define observed state of cluster Important: Run \"operator-sdk generate k8s\" to regenerate code after modifying this file Add custom validation using kubebuilder tags: https://book.kubebuilder.io/beyond_basics/generating_crd.html",
 							Type:        []string{"object"},
 							AdditionalProperties: &spec.SchemaOrBool{
 								Allows: true,
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
-										Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationStageStatus"),
+										Ref: ref("github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMIStageStatus"),
 									},
 								},
 							},
 						},
 					},
-					"PreflightStatus": {
+					"preflightStatus": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
 						},
 					},
-					"PreflightMessage": {
+					"preflightMessage": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"lastError": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"gitHubOAuthEnabled": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
+							Format: "",
+						},
+					},
+					"smtpEnabled": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"boolean"},
 							Format: "",
 						},
 					},
 				},
-				Required: []string{"stages", "PreflightStatus", "PreflightMessage"},
+				Required: []string{"stages", "lastError"},
 			},
 		},
 		Dependencies: []string{
-			"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.InstallationStageStatus"},
+			"github.com/integr8ly/integreatly-operator/pkg/apis/integreatly/v1alpha1.RHMIStageStatus"},
 	}
 }
